@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Great Crystal Fish Defense</title>
+    <meta name="description" content="A whimsical 2D physics adventure - feed crystal fish, launch into Fly Fish Mode, and battle the Ice Dragon!">
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD Overlay -->
+    <div id="hud">
+        <div id="hud-left">
+            <div class="hud-item" id="pearls-display">
+                <span class="hud-icon">💎</span>
+                <span id="pearl-count">0</span>
+            </div>
+            <div class="hud-item" id="level-display">
+                <span class="hud-icon">🌊</span>
+                <span id="level-text">Level 1</span>
+            </div>
+        </div>
+        <div id="hud-center">
+            <div id="game-title">The Great Crystal Fish Defense</div>
+        </div>
+        <div id="hud-right">
+            <div class="hud-item" id="food-display">
+                <span class="hud-icon">🍖</span>
+                <span id="food-count">20</span>
+            </div>
+            <button id="btn-sound" class="hud-btn" title="Toggle Sound">🔊</button>
+        </div>
+    </div>
+
+    <!-- Fish Info Panel -->
+    <div id="fish-panel" class="hidden">
+        <div id="fish-panel-name"></div>
+        <div id="fish-panel-bars">
+            <div class="bar-group">
+                <label>Hunger</label>
+                <div class="bar-track"><div class="bar-fill hunger-bar" id="fish-hunger-bar"></div></div>
+            </div>
+            <div class="bar-group">
+                <label>Joy</label>
+                <div class="bar-track"><div class="bar-fill joy-bar" id="fish-joy-bar"></div></div>
+            </div>
+        </div>
+        <div id="fish-panel-status"></div>
+    </div>
+
+    <!-- Dragon Event Banner -->
+    <div id="dragon-banner" class="hidden">
+        <div class="banner-text">🐉 THE DRAGON APPROACHES! 🐉</div>
+    </div>
+
+    <!-- Victory Banner -->
+    <div id="victory-banner" class="hidden">
+        <div class="victory-text">✨ You Saved the Fish! ✨</div>
+        <div class="victory-sub" id="victory-pearls"></div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="start-screen">
+        <div class="start-content">
+            <h1 class="game-logo">🐟 The Great Crystal Fish Defense 🐟</h1>
+            <p class="start-sub">Feed your fish. Make waves. Defeat the Dragon!</p>
+            <button id="btn-start" class="btn-glow">Start Adventure</button>
+            <div class="start-instructions">
+                <p>🖱️ <strong>Click</strong> to launch food pellets into the Gloop</p>
+                <p>🐠 Feed the fish to fill their Joy meters</p>
+                <p>🚀 Full Joy = <strong>Fly Fish Mode!</strong></p>
+                <p>🐉 Survive the Dragon Events with Ice Crystals</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/water.js"></script>
+    <script src="js/entities.js"></script>
+    <script src="js/game.js"></script>
+</body>
+</html>
