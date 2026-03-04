@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Great Crystal Fish Defense</title>
-    <meta name="description" content="A whimsical 2D physics adventure - feed crystal fish, launch into Fly Fish Mode, and battle the Ice Dragon!">
+    <meta name="description"
+        content="A whimsical 2D physics adventure - feed crystal fish, launch into Fly Fish Mode, and battle the Ice Dragon!">
     <link rel="stylesheet" href="css/style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Outfit:wght@400;600;700&display=swap"
+        rel="stylesheet">
 </head>
+
 <body>
     <canvas id="gameCanvas"></canvas>
 
@@ -41,14 +45,39 @@
         <div id="fish-panel-bars">
             <div class="bar-group">
                 <label>Hunger</label>
-                <div class="bar-track"><div class="bar-fill hunger-bar" id="fish-hunger-bar"></div></div>
+                <div class="bar-track">
+                    <div class="bar-fill hunger-bar" id="fish-hunger-bar"></div>
+                </div>
             </div>
             <div class="bar-group">
                 <label>Joy</label>
-                <div class="bar-track"><div class="bar-fill joy-bar" id="fish-joy-bar"></div></div>
+                <div class="bar-track">
+                    <div class="bar-fill joy-bar" id="fish-joy-bar"></div>
+                </div>
             </div>
         </div>
         <div id="fish-panel-status"></div>
+    </div>
+
+    <!-- Dragon Countdown -->
+    <div id="dragon-countdown" class="hidden">
+        <div class="countdown-text">🐉 DRAGON INCOMING 🐉</div>
+        <div class="countdown-number" id="countdown-number">5</div>
+    </div>
+
+    <!-- Dragon HP Bar (pinned top center during fight) -->
+    <div id="dragon-hp-bar" class="hidden">
+        <div class="dragon-hp-label">🐉 DRAGON</div>
+        <div class="dragon-hp-track">
+            <div class="dragon-hp-fill" id="dragon-hp-fill"></div>
+        </div>
+        <div class="dragon-hp-text" id="dragon-hp-text">100%</div>
+    </div>
+
+    <!-- Fish Select Prompt -->
+    <div id="fish-select-prompt" class="hidden">
+        <div class="select-text">⚡ TAP A FISH TO CONTROL IT ⚡</div>
+        <div class="select-sub">Use your fish's power to defeat the dragon!</div>
     </div>
 
     <!-- Dragon Event Banner -->
@@ -65,6 +94,8 @@
     <!-- Start Screen -->
     <div id="start-screen">
         <div class="start-content">
+            <img id="start-poster" src="assets/banners/poster_start.png" alt="Crystal Fish Defense" class="start-poster"
+                onerror="this.style.display='none'">
             <h1 class="game-logo">🐟 The Great Crystal Fish Defense 🐟</h1>
             <p class="start-sub">Feed your fish. Make waves. Defeat the Dragon!</p>
             <button id="btn-start" class="btn-glow">Start Adventure</button>
@@ -72,7 +103,8 @@
                 <p>🖱️ <strong>Click</strong> to launch food pellets into the Gloop</p>
                 <p>🐠 Feed the fish to fill their Joy meters</p>
                 <p>🚀 Full Joy = <strong>Fly Fish Mode!</strong></p>
-                <p>🐉 Survive the Dragon Events with Ice Crystals</p>
+                <p>🐉 When the Dragon comes, <strong>tap a fish</strong> to control it!</p>
+                <p>⚡ Each fish has a <strong>unique dragon-fighting power!</strong></p>
             </div>
         </div>
     </div>
@@ -81,4 +113,5 @@
     <script src="js/entities.js"></script>
     <script src="js/game.js"></script>
 </body>
+
 </html>

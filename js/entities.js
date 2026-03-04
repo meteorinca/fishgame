@@ -224,6 +224,11 @@ class Fish {
         this.abilityActive = false;
         this.abilityTimer = 0;
         this.abilityFx = []; // visual effects from abilities
+
+        // Shield (from Glimmer's power)
+        this.shielded = false;
+        this.shieldTimer = 0;
+        this.zoomBiteTarget = null;
     }
 
     feed(amount) {
@@ -756,415 +761,362 @@ class FlyingBug {
     }
 }
 
-// ---- DRAGON ----
+// ---- DRAGON (PNG Animation System) ----
 class Dragon {
-    constructor(canvasW, canvasH) {
+    constructor(canvasW, canvasH, level) {
         this.canvasW = canvasW;
         this.canvasH = canvasH;
         this.x = canvasW / 2;
-        this.y = 80;
-        this.width = 160;
-        this.height = 120;
+        this.y = -200;
+        this.width = 200;
+        this.height = 160;
         this.alive = true;
-        this.hp = 100;
-        this.maxHp = 100;
-        this.phase = 'entering'; // entering, idle, attacking, frozen, defeated
+
+        // Level scaling
+        this.level = level || 1;
+        this.maxHp = 80 + level * 40;
+        this.hp = this.maxHp;
+        this.moveSpeed = 0.8 + level * 0.3;
+        this.attackCooldown = Math.max(80, 220 - level * 25);
+
+        this.phase = 'entering';
         this.enterTimer = 0;
         this.attackTimer = 0;
-        this.attackCooldown = 180;
-        this.attackDuration = 60;
-        this.iceLevel = 0;  // 0-100, visual ice buildup
         this.wobble = 0;
-        this.breathX = 0;
-        this.breathY = 0;
-        this.breathing = false;
-        this.frozenTimer = 0;
         this.moveDir = 1;
-        this.moveSpeed = 1;
+        this.facingRight = true;
+
+        // PNG Animation frames
+        this.animFrame = 'bodyL'; // bodyL, L1, L2, L3, F1, F2
+        this.animTimer = 0;
+        this.animSequence = [];
+        this.animIdx = 0;
+        this.doFire = false; // whether this attack cycle actually fires
+
+        // Fireball system
+        this.fireballs = [];
+        this.fireReady = false;
+
+        // Blood drops on hit
+        this.bloodDrops = [];
+
+        // Loaded images cache
+        this._imgs = {};
+        this._loadFrames();
     }
 
-    hit(damage) {
-        if (this.phase === 'frozen' || this.phase === 'defeated') return;
-        this.hp -= damage;
-        this.iceLevel = Math.min(100, this.iceLevel + damage * 1.5);
-        this.wobble = 10;
-
-        if (this.hp <= 0) {
-            this.phase = 'defeated';
-            this.frozenTimer = 180;
+    _loadFrames() {
+        const frames = ['dragon_bodyL', 'dragon_bodyL1', 'dragon_bodyL2', 'dragon_bodyL3',
+            'dragon_bodyF1', 'dragon_bodyF2', 'fire', 'fireforming'];
+        for (const f of frames) {
+            const img = new Image();
+            img.src = `assets/dragon/${f}.png`;
+            this._imgs[f] = img;
         }
     }
 
+    _getImg(key) {
+        const img = this._imgs[key];
+        return (img && img.complete && img.naturalWidth > 0) ? img : null;
+    }
+
+    hit(damage) {
+        if (this.phase === 'defeated') return;
+        this.hp -= damage;
+        this.wobble = 12;
+
+        // Blood drops
+        for (let i = 0; i < 8; i++) {
+            this.bloodDrops.push({
+                x: this.x + (Math.random() - 0.5) * 60,
+                y: this.y + this.height * 0.3,
+                vx: (Math.random() - 0.5) * 4,
+                vy: 2 + Math.random() * 5,
+                r: 2 + Math.random() * 4,
+                alpha: 1
+            });
+        }
+
+        if (this.hp <= 0) {
+            this.hp = 0;
+            this.phase = 'defeated';
+        }
+    }
+
+    _startAttackSequence() {
+        this.doFire = Math.random() < 0.65 + this.level * 0.05;
+        if (this.doFire) {
+            this.animSequence = ['bodyL', 'L1', 'L2', 'L3', 'F1', 'F2', 'F2', 'F1', 'L3', 'L2', 'L1', 'bodyL'];
+        } else {
+            this.animSequence = ['bodyL', 'L1', 'L2', 'L3', 'L2', 'L1', 'bodyL'];
+        }
+        this.animIdx = 0;
+        this.animTimer = 0;
+        this.fireReady = false;
+        this.phase = 'animating';
+    }
+
     update(waterSystem) {
-        this.wobble *= 0.9;
+        this.wobble *= 0.88;
+
+        // Blood drops
+        for (let i = this.bloodDrops.length - 1; i >= 0; i--) {
+            const b = this.bloodDrops[i];
+            b.x += b.vx; b.y += b.vy; b.vy += 0.3;
+            b.alpha -= 0.01;
+            if (b.y > waterSystem.END_Y || b.alpha <= 0) this.bloodDrops.splice(i, 1);
+        }
+
+        // Fireballs
+        for (let i = this.fireballs.length - 1; i >= 0; i--) {
+            const fb = this.fireballs[i];
+            fb.update(waterSystem);
+            if (!fb.alive) this.fireballs.splice(i, 1);
+        }
 
         switch (this.phase) {
             case 'entering':
                 this.enterTimer++;
-                this.y = -150 + this.enterTimer * 1.5;
-                if (this.y >= 80) {
-                    this.y = 80;
-                    this.phase = 'idle';
-                }
+                this.y = -200 + this.enterTimer * 2;
+                if (this.y >= 60) { this.y = 60; this.phase = 'idle'; this.animFrame = 'bodyL'; }
                 break;
 
             case 'idle':
-                // Move left/right
                 this.x += this.moveDir * this.moveSpeed;
-                if (this.x < 150 || this.x > this.canvasW - 150) {
-                    this.moveDir *= -1;
-                }
+                if (this.x < 120 || this.x > this.canvasW - 120) this.moveDir *= -1;
+                this.facingRight = this.moveDir > 0;
                 this.attackTimer++;
+                this.animFrame = 'bodyL';
                 if (this.attackTimer >= this.attackCooldown) {
-                    this.phase = 'attacking';
                     this.attackTimer = 0;
-                    this.breathX = this.x;
-                    this.breathY = this.y + this.height / 2;
-                    this.breathing = true;
+                    this._startAttackSequence();
                 }
-                // Slight ice melt over time
-                this.iceLevel = Math.max(0, this.iceLevel - 0.05);
                 break;
 
-            case 'attacking':
-                this.x += this.moveDir * this.moveSpeed * 0.3;
-                this.attackTimer++;
-                this.breathX = this.x;
-                this.breathY = this.y + this.height;
-
-                if (this.attackTimer >= this.attackDuration) {
-                    this.phase = 'idle';
-                    this.attackTimer = 0;
-                    this.breathing = false;
+            case 'animating':
+                this.x += this.moveDir * this.moveSpeed * 0.2;
+                this.animTimer++;
+                const frameSpeed = Math.max(6, 12 - this.level);
+                if (this.animTimer >= frameSpeed) {
+                    this.animTimer = 0;
+                    this.animIdx++;
+                    if (this.animIdx >= this.animSequence.length) {
+                        this.phase = 'idle';
+                        this.animFrame = 'bodyL';
+                    } else {
+                        const frameName = this.animSequence[this.animIdx];
+                        this.animFrame = frameName;
+                        if (frameName === 'F2' && this.doFire && !this.fireReady) {
+                            this.fireReady = true;
+                            this._spawnFireball(waterSystem);
+                        }
+                    }
                 }
                 break;
 
             case 'defeated':
-                this.frozenTimer--;
-                this.y += 3; // Fall
-                if (this.y > waterSystem.START_Y) {
-                    waterSystem.splashAtX(this.x, 200);
-                    waterSystem.splashAtX(this.x - 40, 150);
-                    waterSystem.splashAtX(this.x + 40, 150);
+                this.y += 4;
+                if (this.y > waterSystem.START_Y - 20) {
+                    waterSystem.splashAtX(this.x, 250);
+                    waterSystem.splashAtX(this.x - 50, 180);
+                    waterSystem.splashAtX(this.x + 50, 180);
                     this.alive = false;
                 }
                 break;
         }
     }
 
+    _spawnFireball(waterSystem) {
+        const count = Math.min(1 + Math.floor(this.level / 3), 3);
+        for (let i = 0; i < count; i++) {
+            const spread = (i - (count - 1) / 2) * 60;
+            this.fireballs.push(new DragonFireball(
+                this.x + spread, this.y + this.height * 0.5,
+                spread * 0.02, 3 + this.level * 0.5
+            ));
+        }
+    }
+
     draw(ctx) {
         if (!this.alive) return;
-        ctx.save();
-        ctx.translate(this.x + Math.sin(this.wobble) * this.wobble, this.y);
 
-        // Wings
-        const wingFlap = Math.sin(Date.now() * 0.005) * 10;
-        ctx.beginPath();
-        ctx.moveTo(-30, -10);
-        ctx.quadraticCurveTo(-this.width * 0.6, -60 - wingFlap, -this.width * 0.8, 10);
-        ctx.lineTo(-30, 10);
-        ctx.closePath();
-        ctx.fillStyle = '#b71c1c';
-        ctx.fill();
+        // Draw fireballs
+        for (const fb of this.fireballs) fb.draw(ctx);
 
-        ctx.beginPath();
-        ctx.moveTo(30, -10);
-        ctx.quadraticCurveTo(this.width * 0.6, -60 - wingFlap, this.width * 0.8, 10);
-        ctx.lineTo(30, 10);
-        ctx.closePath();
-        ctx.fill();
-
-        // Body
-        ctx.beginPath();
-        ctx.ellipse(0, 0, this.width * 0.3, this.height * 0.35, 0, 0, Math.PI * 2);
-        const bodyGrad = ctx.createRadialGradient(-10, -10, 5, 0, 0, this.width * 0.3);
-        bodyGrad.addColorStop(0, '#ef5350');
-        bodyGrad.addColorStop(1, '#b71c1c');
-        ctx.fillStyle = bodyGrad;
-        ctx.fill();
-
-        // Belly
-        ctx.beginPath();
-        ctx.ellipse(0, 10, this.width * 0.2, this.height * 0.2, 0, 0, Math.PI * 2);
-        ctx.fillStyle = '#ff8a65';
-        ctx.fill();
-
-        // Head
-        ctx.beginPath();
-        ctx.ellipse(0, -this.height * 0.3, 22, 18, 0, 0, Math.PI * 2);
-        ctx.fillStyle = '#e53935';
-        ctx.fill();
-
-        // Horns
-        ctx.beginPath();
-        ctx.moveTo(-12, -this.height * 0.3 - 14);
-        ctx.lineTo(-18, -this.height * 0.3 - 30);
-        ctx.lineTo(-6, -this.height * 0.3 - 16);
-        ctx.fillStyle = '#8d6e63';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.moveTo(12, -this.height * 0.3 - 14);
-        ctx.lineTo(18, -this.height * 0.3 - 30);
-        ctx.lineTo(6, -this.height * 0.3 - 16);
-        ctx.fill();
-
-        // Eyes
-        ctx.beginPath();
-        ctx.arc(-8, -this.height * 0.32, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#fff9c4';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(-8, -this.height * 0.32, 2, 0, Math.PI * 2);
-        ctx.fillStyle = '#311b92';
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(8, -this.height * 0.32, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#fff9c4';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(8, -this.height * 0.32, 2, 0, Math.PI * 2);
-        ctx.fillStyle = '#311b92';
-        ctx.fill();
-
-        // Snout
-        ctx.beginPath();
-        ctx.ellipse(0, -this.height * 0.22, 8, 5, 0, 0, Math.PI * 2);
-        ctx.fillStyle = '#ef5350';
-        ctx.fill();
-        // Nostrils
-        ctx.beginPath();
-        ctx.arc(-3, -this.height * 0.22, 1.5, 0, Math.PI * 2);
-        ctx.arc(3, -this.height * 0.22, 1.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#4a0000';
-        ctx.fill();
-
-        // Fire breath
-        if (this.breathing) {
-            const fireLength = 80 + Math.sin(Date.now() * 0.02) * 20;
-            const grad = ctx.createLinearGradient(0, this.height * 0.2, 0, this.height * 0.2 + fireLength);
-            grad.addColorStop(0, 'rgba(255, 200, 50, 0.9)');
-            grad.addColorStop(0.3, 'rgba(255, 100, 20, 0.7)');
-            grad.addColorStop(0.7, 'rgba(255, 50, 0, 0.4)');
-            grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
-
-            for (let i = 0; i < 5; i++) {
-                const fx = (Math.random() - 0.5) * 30;
-                ctx.beginPath();
-                ctx.moveTo(fx - 8, this.height * 0.2);
-                ctx.lineTo(fx + (Math.random() - 0.5) * 40, this.height * 0.2 + fireLength);
-                ctx.lineTo(fx + 8, this.height * 0.2);
-                ctx.closePath();
-                ctx.fillStyle = grad;
-                ctx.fill();
-            }
+        // Blood drops
+        for (const b of this.bloodDrops) {
+            ctx.save();
+            ctx.globalAlpha = b.alpha;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+            ctx.fillStyle = '#b71c1c';
+            ctx.fill();
+            ctx.restore();
         }
 
-        // Ice buildup overlay
-        if (this.iceLevel > 0) {
-            ctx.globalAlpha = this.iceLevel / 100 * 0.6;
-            ctx.beginPath();
-            ctx.ellipse(0, 0, this.width * 0.35, this.height * 0.4, 0, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(130, 210, 255, 0.5)';
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(200, 240, 255, 0.7)';
-            ctx.lineWidth = 2;
-            ctx.stroke();
+        ctx.save();
+        const wobbleX = Math.sin(this.wobble) * this.wobble;
+        ctx.translate(this.x + wobbleX, this.y);
+        if (!this.facingRight) ctx.scale(-1, 1);
 
-            // Ice crystal formations
-            for (let i = 0; i < Math.floor(this.iceLevel / 20); i++) {
-                const ix = (Math.random() - 0.5) * this.width * 0.5;
-                const iy = (Math.random() - 0.5) * this.height * 0.6;
-                ctx.beginPath();
-                ctx.moveTo(ix, iy - 8);
-                ctx.lineTo(ix + 4, iy);
-                ctx.lineTo(ix, iy + 8);
-                ctx.lineTo(ix - 4, iy);
-                ctx.closePath();
-                ctx.fillStyle = 'rgba(180, 230, 255, 0.8)';
-                ctx.fill();
+        // Try PNG frame
+        const imgKey = 'dragon_' + this.animFrame;
+        const img = this._getImg(imgKey.replace('dragon_bodyL', 'dragon_bodyL'));
+        const realKey = this.animFrame === 'bodyL' ? 'dragon_bodyL' :
+            this.animFrame === 'L1' ? 'dragon_bodyL1' :
+                this.animFrame === 'L2' ? 'dragon_bodyL2' :
+                    this.animFrame === 'L3' ? 'dragon_bodyL3' :
+                        this.animFrame === 'F1' ? 'dragon_bodyF1' :
+                            this.animFrame === 'F2' ? 'dragon_bodyF2' : 'dragon_bodyL';
+        const realImg = this._getImg(realKey);
+
+        if (realImg) {
+            const scale = this.width / realImg.naturalWidth;
+            const dw = realImg.naturalWidth * scale;
+            const dh = realImg.naturalHeight * scale;
+            ctx.drawImage(realImg, -dw / 2, -dh / 2, dw, dh);
+
+            // Fire forming/fire overlay when F2
+            if (this.animFrame === 'F2' || this.animFrame === 'F1') {
+                const fireKey = this.animFrame === 'F1' ? 'fireforming' : 'fire';
+                const fireImg = this._getImg(fireKey);
+                if (fireImg) {
+                    const fw = fireImg.naturalWidth * scale * 0.8;
+                    const fh = fireImg.naturalHeight * scale * 0.8;
+                    ctx.drawImage(fireImg, -fw / 2, dh * 0.3, fw, fh);
+                }
             }
+        } else {
+            // Programmatic fallback
+            this._drawFallback(ctx);
+        }
+
+        // Wobble flash when hit
+        if (this.wobble > 2) {
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
             ctx.globalAlpha = 1;
         }
 
-        // HP bar
-        const hpBarW = 80;
-        const hpBarH = 6;
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(-hpBarW / 2, -this.height * 0.5, hpBarW, hpBarH);
-        const hpFrac = this.hp / this.maxHp;
-        ctx.fillStyle = hpFrac > 0.5 ? '#f44336' : hpFrac > 0.25 ? '#ff9800' : '#4fc3f7';
-        ctx.fillRect(-hpBarW / 2, -this.height * 0.5, hpBarW * hpFrac, hpBarH);
-
         ctx.restore();
     }
 
-    getFireZone() {
-        if (!this.breathing) return null;
-        return {
-            x: this.x - 40,
-            y: this.y + this.height * 0.2,
-            width: 80,
-            height: 100
-        };
+    _drawFallback(ctx) {
+        const wingFlap = Math.sin(Date.now() * 0.005) * 10;
+        ctx.beginPath();
+        ctx.moveTo(-30, -10);
+        ctx.quadraticCurveTo(-this.width * 0.5, -50 - wingFlap, -this.width * 0.6, 10);
+        ctx.lineTo(-30, 10); ctx.closePath();
+        ctx.fillStyle = '#b71c1c'; ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(30, -10);
+        ctx.quadraticCurveTo(this.width * 0.5, -50 - wingFlap, this.width * 0.6, 10);
+        ctx.lineTo(30, 10); ctx.closePath(); ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(0, 0, this.width * 0.25, this.height * 0.3, 0, 0, Math.PI * 2);
+        ctx.fillStyle = '#ef5350'; ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(0, -this.height * 0.25, 18, 14, 0, 0, Math.PI * 2);
+        ctx.fillStyle = '#e53935'; ctx.fill();
+        ctx.beginPath();
+        ctx.arc(-6, -this.height * 0.27, 3, 0, Math.PI * 2);
+        ctx.arc(6, -this.height * 0.27, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff9c4'; ctx.fill();
     }
 }
 
-// ---- SUBMARINE (Brine-O-Boat) ----
-class Submarine {
-    constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.width = 60;
-        this.height = 30;
-        this.speed = 3;
-        this.crystals = 0;
+// ---- DRAGON FIREBALL ----
+class DragonFireball {
+    constructor(x, y, vx, vy) {
+        this.x = x; this.y = y;
+        this.vx = vx; this.vy = vy;
+        this.radius = 18;
         this.alive = true;
-        this.propPhase = 0;
+        this.trail = [];
+        this.splashed = false;
+        this.phase = 0;
     }
 
-    update(keys, waterSystem) {
-        this.propPhase += 0.15;
-        const minY = waterSystem.START_Y + 15;
-        const maxY = waterSystem.END_Y - 15;
+    update(waterSystem) {
+        if (!this.alive) return;
+        this.vy += 0.15;
+        this.x += this.vx;
+        this.y += this.vy;
+        this.phase += 0.1;
+        this.trail.push({ x: this.x, y: this.y, r: this.radius, alpha: 1 });
+        if (this.trail.length > 15) this.trail.shift();
+        for (const t of this.trail) t.alpha -= 0.06;
 
-        if (keys.left) this.x -= this.speed;
-        if (keys.right) this.x += this.speed;
-        if (keys.up) this.y -= this.speed;
-        if (keys.down) this.y += this.speed;
-
-        this.x = Math.max(30, Math.min(waterSystem.canvas.width - 30, this.x));
-        this.y = Math.max(minY, Math.min(maxY, this.y));
-    }
-
-    collectCrystal() {
-        this.crystals++;
-    }
-
-    shootCrystal() {
-        if (this.crystals <= 0) return null;
-        this.crystals--;
-        return {
-            x: this.x,
-            y: this.y - 10,
-            vx: 0,
-            vy: -8,
-            radius: 6,
-            alive: true
-        };
+        if (this.y >= waterSystem.START_Y && !this.splashed) {
+            this.splashed = true;
+            waterSystem.splashAtX(this.x, 180);
+            waterSystem.splashAtX(this.x - 20, 120);
+            waterSystem.splashAtX(this.x + 20, 120);
+            // Trigger screen shake via flag
+            this.hitWater = true;
+        }
+        if (this.y > waterSystem.END_Y + 50) this.alive = false;
     }
 
     draw(ctx) {
+        for (const t of this.trail) {
+            if (t.alpha > 0) {
+                ctx.save(); ctx.globalAlpha = t.alpha * 0.4;
+                ctx.beginPath(); ctx.arc(t.x, t.y, t.r * 0.6, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,100,20,0.6)'; ctx.fill();
+                ctx.restore();
+            }
+        }
         ctx.save();
         ctx.translate(this.x, this.y);
-
-        // Hull
-        ctx.beginPath();
-        ctx.ellipse(0, 0, this.width / 2, this.height / 2, 0, 0, Math.PI * 2);
-        const hullGrad = ctx.createLinearGradient(0, -this.height / 2, 0, this.height / 2);
-        hullGrad.addColorStop(0, '#78909c');
-        hullGrad.addColorStop(0.5, '#546e7a');
-        hullGrad.addColorStop(1, '#37474f');
-        ctx.fillStyle = hullGrad;
-        ctx.fill();
-        ctx.strokeStyle = '#90a4ae';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        // Porthole
-        ctx.beginPath();
-        ctx.arc(8, -2, 7, 0, Math.PI * 2);
-        ctx.fillStyle = '#b3e5fc';
-        ctx.fill();
-        ctx.strokeStyle = '#607d8b';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Periscope
-        ctx.beginPath();
-        ctx.moveTo(-5, -this.height / 2);
-        ctx.lineTo(-5, -this.height / 2 - 12);
-        ctx.lineTo(3, -this.height / 2 - 12);
-        ctx.lineTo(3, -this.height / 2 - 8);
-        ctx.strokeStyle = '#607d8b';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-
-        // Propeller
-        const propAngle = this.propPhase;
-        ctx.save();
-        ctx.translate(-this.width / 2 - 5, 0);
-        for (let i = 0; i < 3; i++) {
-            const a = propAngle + (i * Math.PI * 2 / 3);
-            ctx.beginPath();
-            ctx.ellipse(Math.cos(a) * 6, Math.sin(a) * 6, 5, 2, a, 0, Math.PI * 2);
-            ctx.fillStyle = '#90a4ae';
-            ctx.fill();
-        }
-        ctx.restore();
-
-        // Crystal count
-        if (this.crystals > 0) {
-            ctx.font = 'bold 11px Outfit, sans-serif';
-            ctx.fillStyle = '#4fc3f7';
-            ctx.textAlign = 'center';
-            ctx.fillText(`💎 ${this.crystals}`, 0, this.height / 2 + 14);
-        }
-
+        const grd = ctx.createRadialGradient(0, 0, 2, 0, 0, this.radius);
+        grd.addColorStop(0, 'rgba(255,255,200,0.95)');
+        grd.addColorStop(0.3, 'rgba(255,180,50,0.85)');
+        grd.addColorStop(0.7, 'rgba(255,80,0,0.6)');
+        grd.addColorStop(1, 'rgba(200,0,0,0)');
+        ctx.beginPath(); ctx.arc(0, 0, this.radius + Math.sin(this.phase) * 4, 0, Math.PI * 2);
+        ctx.fillStyle = grd; ctx.fill();
         ctx.restore();
     }
 }
 
-// ---- CRYSTAL PROJECTILE ----
-class CrystalProjectile {
+// ---- ICE DART (thrown by controlled fish) ----
+class IceDart {
     constructor(x, y, vx, vy) {
-        this.x = x;
-        this.y = y;
-        this.vx = vx;
-        this.vy = vy;
-        this.radius = 6;
+        this.x = x; this.y = y;
+        this.vx = vx; this.vy = vy;
+        this.radius = 7;
         this.alive = true;
         this.trail = [];
     }
 
     update() {
         this.trail.push({ x: this.x, y: this.y, alpha: 1 });
-        if (this.trail.length > 8) this.trail.shift();
-        for (const t of this.trail) t.alpha -= 0.12;
-
-        this.x += this.vx;
-        this.y += this.vy;
-
-        if (this.y < -50) this.alive = false;
+        if (this.trail.length > 10) this.trail.shift();
+        for (const t of this.trail) t.alpha -= 0.1;
+        this.x += this.vx; this.y += this.vy;
+        if (this.y < -50 || this.x < -50 || this.x > 3000) this.alive = false;
     }
 
     draw(ctx) {
-        // Trail
         for (const t of this.trail) {
             if (t.alpha > 0) {
-                ctx.save();
-                ctx.globalAlpha = t.alpha * 0.5;
-                ctx.beginPath();
-                ctx.arc(t.x, t.y, this.radius * 0.5, 0, Math.PI * 2);
-                ctx.fillStyle = '#4fc3f7';
-                ctx.fill();
-                ctx.restore();
+                ctx.save(); ctx.globalAlpha = t.alpha * 0.4;
+                ctx.beginPath(); ctx.arc(t.x, t.y, 3, 0, Math.PI * 2);
+                ctx.fillStyle = '#4fc3f7'; ctx.fill(); ctx.restore();
             }
         }
-
-        ctx.save();
-        ctx.translate(this.x, this.y);
+        ctx.save(); ctx.translate(this.x, this.y);
+        ctx.rotate(Math.atan2(this.vy, this.vx));
         ctx.beginPath();
-        ctx.moveTo(0, -this.radius);
-        ctx.lineTo(this.radius * 0.6, 0);
-        ctx.lineTo(0, this.radius);
-        ctx.lineTo(-this.radius * 0.6, 0);
+        ctx.moveTo(this.radius, 0);
+        ctx.lineTo(-this.radius * 0.5, -this.radius * 0.5);
+        ctx.lineTo(-this.radius * 0.3, 0);
+        ctx.lineTo(-this.radius * 0.5, this.radius * 0.5);
         ctx.closePath();
-        ctx.fillStyle = '#4fc3f7';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        ctx.fillStyle = '#4fc3f7'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1; ctx.stroke();
         ctx.restore();
     }
 }
