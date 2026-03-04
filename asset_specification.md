@@ -88,6 +88,20 @@ Each fish needs **6 animation states**. Provide as individual frames or sprite s
 
 ---
 
+## 🦈 Shark Assets
+
+| Asset | Filename | Size (1x) | Description |
+|---|---|---|---|
+| Shark body | `shark_body.png` | 260×100 | Sleek, menacing grey shark. Scarred. Red glowing eyes, slit pupils. Rows of white sharp teeth visible. Dark grey top, lighter belly. Tall dorsal fin. Claymation style. |
+| Shark attacking | `shark_attack.png` | 260×120 | Jaw wide open, teeth prominent, lunging forward pose |
+| Shark fleeing | `shark_flee.png` | 260×100 | Turning away, tail curved, retreating pose |
+| Shark dead | `shark_dead.png` | 260×100 | X-eyes, belly slightly up, sinking pose |
+
+> [!NOTE]
+> Place shark assets in `assets/shark/`. The game renders sharks procedurally (with chomping jaw animation, glowing red eyes, scars) until PNGs are provided.
+
+---
+
 ## 🚤 Submarine (Brine-O-Boat)
 
 | Asset | Filename | Size (1x) | Description |
@@ -231,6 +245,11 @@ fishgame/
 │   │   ├── dragon_fire.png
 │   │   ├── dragon_steam.png
 │   │   └── ice_overlay.png
+│   ├── shark/
+│   │   ├── shark_body.png
+│   │   ├── shark_attack.png
+│   │   ├── shark_flee.png
+│   │   └── shark_dead.png
 │   ├── submarine/
 │   │   ├── submarine.png
 │   │   ├── sub_propeller.png
@@ -322,5 +341,5 @@ fishgame/
 ---
 
 > [!TIP]
-> **Total unique assets: ~80 images + ~14 audio files**
-> The game currently renders everything with programmatic shapes and gradients, so assets can be added incrementally without breaking anything.
+> **Total unique assets: ~90 images + ~14 audio files**
+> The game currently renders everything with programmatic shapes and gradients, so assets can be added incrementally without breaking anything. Just drop files into the correct `assets/` subfolder with the right filename, push, and they appear automatically!

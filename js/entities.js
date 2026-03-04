@@ -216,6 +216,14 @@ class Fish {
         this.targetX = null;
         this.targetY = null;
         this.idleTimer = 0;
+
+        // Fighting state
+        this.fighting = false;
+        this.fightTarget = null;
+        this.fightCooldown = 0;
+        this.abilityActive = false;
+        this.abilityTimer = 0;
+        this.abilityFx = []; // visual effects from abilities
     }
 
     feed(amount) {
@@ -223,10 +231,75 @@ class Fish {
         this.joy = Math.min(100, this.joy + amount * 0.6);
     }
 
+    // Can this fish fight? Needs at least some food in belly
+    canFight() {
+        return this.hunger >= 25 && this.fightCooldown <= 0 && !this.flyFishMode;
+    }
+
+    // Engage shark in combat using unique ability
+    fightShark(shark, waterSystem) {
+        if (!this.canFight()) return false;
+        this.fighting = true;
+        this.fightTarget = shark;
+        this.fightCooldown = 120; // 2 seconds cooldown
+        this.abilityActive = true;
+        this.abilityTimer = 40;
+        this.hunger = Math.max(0, this.hunger - 15); // fighting costs hunger
+
+        let damage = 0;
+        switch (this.type) {
+            case 'spike':
+                // Ripple shockwave — big splash that stuns sharks
+                damage = 35;
+                waterSystem.splashAtX(this.x, 100);
+                // Create expanding ring effect
+                this.abilityFx.push({ type: 'shockwave', x: this.x, y: this.y, radius: 10, maxRadius: 120, alpha: 1 });
+                break;
+            case 'glimmer':
+                // Blinding flash — intense light burst
+                damage = 25;
+                this.abilityFx.push({ type: 'flash', x: this.x, y: this.y, radius: 30, maxRadius: 150, alpha: 1 });
+                break;
+            case 'zoom':
+                // Speed ram — dash into the shark
+                damage = 45;
+                const dx = shark.x - this.x;
+                const dy = shark.y - this.y;
+                const angle = Math.atan2(dy, dx);
+                this.vx = Math.cos(angle) * 12;
+                this.vy = Math.sin(angle) * 12;
+                this.abilityFx.push({ type: 'speedlines', x: this.x, y: this.y, angle: angle, alpha: 1 });
+                break;
+        }
+        shark.takeDamage(damage);
+        return true;
+    }
+
     update(waterSystem, foodPellets, bugs) {
         if (this.flyFishMode) {
             this._updateFlyFish(waterSystem, bugs);
             return;
+        }
+
+        // Update fight cooldown
+        if (this.fightCooldown > 0) this.fightCooldown--;
+        if (this.abilityTimer > 0) {
+            this.abilityTimer--;
+            if (this.abilityTimer <= 0) {
+                this.abilityActive = false;
+                this.fighting = false;
+                this.fightTarget = null;
+            }
+        }
+
+        // Update ability effects
+        for (let i = this.abilityFx.length - 1; i >= 0; i--) {
+            const fx = this.abilityFx[i];
+            fx.alpha -= 0.03;
+            if (fx.type === 'shockwave' || fx.type === 'flash') {
+                fx.radius += (fx.maxRadius - fx.radius) * 0.15;
+            }
+            if (fx.alpha <= 0) this.abilityFx.splice(i, 1);
         }
 
         this.swimPhase += 0.08;
@@ -470,6 +543,46 @@ class Fish {
         }
 
         ctx.restore();
+
+        // Draw ability effects
+        for (const fx of this.abilityFx) {
+            ctx.save();
+            ctx.globalAlpha = fx.alpha;
+            if (fx.type === 'shockwave') {
+                ctx.beginPath();
+                ctx.arc(fx.x, fx.y, fx.radius, 0, Math.PI * 2);
+                ctx.strokeStyle = '#81c784';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                // Inner ring
+                ctx.beginPath();
+                ctx.arc(fx.x, fx.y, fx.radius * 0.6, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(129, 199, 132, 0.5)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            } else if (fx.type === 'flash') {
+                const fGrad = ctx.createRadialGradient(fx.x, fx.y, 5, fx.x, fx.y, fx.radius);
+                fGrad.addColorStop(0, 'rgba(255, 255, 200, 0.8)');
+                fGrad.addColorStop(0.5, 'rgba(255, 235, 59, 0.4)');
+                fGrad.addColorStop(1, 'rgba(255, 235, 59, 0)');
+                ctx.beginPath();
+                ctx.arc(fx.x, fx.y, fx.radius, 0, Math.PI * 2);
+                ctx.fillStyle = fGrad;
+                ctx.fill();
+            } else if (fx.type === 'speedlines') {
+                for (let i = 0; i < 6; i++) {
+                    const offset = (Math.random() - 0.5) * 20;
+                    const len = 30 + Math.random() * 40;
+                    ctx.beginPath();
+                    ctx.moveTo(fx.x + offset, fx.y + offset);
+                    ctx.lineTo(fx.x + offset - Math.cos(fx.angle) * len, fx.y + offset - Math.sin(fx.angle) * len);
+                    ctx.strokeStyle = 'rgba(233, 30, 99, 0.6)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            }
+            ctx.restore();
+        }
 
         // Draw meters above fish
         this._drawMeters(ctx);
@@ -1097,5 +1210,365 @@ class SparklePearl {
         ctx.fill();
 
         ctx.restore();
+    }
+}
+
+// ---- SHARK ----
+class Shark {
+    constructor(canvasW, waterStartY, waterEndY) {
+        this.canvasW = canvasW;
+        this.waterStartY = waterStartY;
+        this.waterEndY = waterEndY;
+
+        // Spawn from far below
+        this.x = 80 + Math.random() * (canvasW - 160);
+        this.y = waterEndY + 50 + Math.random() * 100;
+        this.width = 90 + Math.random() * 40;
+        this.height = 35 + Math.random() * 15;
+
+        this.vx = (Math.random() - 0.5) * 1.5;
+        this.vy = -(1 + Math.random() * 1.5); // Rising from depths
+        this.baseSpeed = 1.5;
+        this.facingRight = this.vx >= 0;
+
+        this.alive = true;
+        this.hp = 100;
+        this.maxHp = 100;
+        this.phase = 'rising'; // rising, hunting, fleeing, dying
+
+        this.jawOpen = 0; // 0-1 jaw animation
+        this.jawDir = 1;
+        this.swimPhase = Math.random() * Math.PI * 2;
+        this.wobble = 0;
+        this.eyeGlow = 0;
+
+        // Target fish
+        this.targetFish = null;
+        this.huntTimer = 0;
+        this.maxHuntTime = 600; // 10 seconds max before leaving
+
+        // Scar marks (procedural character)
+        this.scars = [];
+        const scarCount = Math.floor(Math.random() * 3) + 1;
+        for (let i = 0; i < scarCount; i++) {
+            this.scars.push({
+                x: (Math.random() - 0.5) * this.width * 0.6,
+                y: (Math.random() - 0.5) * this.height * 0.4,
+                len: 5 + Math.random() * 15,
+                angle: (Math.random() - 0.5) * 0.8
+            });
+        }
+    }
+
+    takeDamage(amount) {
+        this.hp -= amount;
+        this.wobble = 8;
+        if (this.hp <= 0) {
+            this.phase = 'dying';
+            this.vy = 2; // Sink
+        } else if (this.hp < 40) {
+            this.phase = 'fleeing';
+        }
+    }
+
+    update(fishes, waterSystem) {
+        this.swimPhase += 0.06;
+        this.wobble *= 0.9;
+        this.eyeGlow = 0.5 + Math.sin(Date.now() * 0.005) * 0.3;
+        this.huntTimer++;
+
+        // Jaw animation
+        this.jawOpen += this.jawDir * 0.03;
+        if (this.jawOpen > 0.6) this.jawDir = -1;
+        if (this.jawOpen < 0) this.jawDir = 1;
+
+        switch (this.phase) {
+            case 'rising':
+                this.vy += 0.01; // Slow deceleration
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Once in hunting zone, switch to hunting
+                if (this.y <= this.waterStartY + (this.waterEndY - this.waterStartY) * 0.5) {
+                    this.phase = 'hunting';
+                }
+                break;
+
+            case 'hunting':
+                // Find nearest fish to hunt
+                let nearest = null;
+                let nearestDist = Infinity;
+                for (const fish of fishes) {
+                    if (fish.flyFishMode) continue;
+                    const dist = Math.hypot(fish.x - this.x, fish.y - this.y);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearest = fish;
+                    }
+                }
+                this.targetFish = nearest;
+
+                if (nearest) {
+                    const dx = nearest.x - this.x;
+                    const dy = nearest.y - this.y;
+                    const angle = Math.atan2(dy, dx);
+                    this.vx += Math.cos(angle) * 0.08;
+                    this.vy += Math.sin(angle) * 0.04;
+                    this.facingRight = dx > 0;
+                }
+
+                // Damping
+                this.vx *= 0.97;
+                this.vy *= 0.97;
+
+                const spd = Math.hypot(this.vx, this.vy);
+                if (spd > this.baseSpeed) {
+                    this.vx = (this.vx / spd) * this.baseSpeed;
+                    this.vy = (this.vy / spd) * this.baseSpeed;
+                }
+
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Create menacing water disturbance
+                if (Math.random() < 0.05) {
+                    waterSystem.splashAtX(this.x, 20);
+                }
+
+                // Stay in water
+                const minY = this.waterStartY + 30;
+                const maxY = this.waterEndY - 20;
+                if (this.y < minY) { this.y = minY; this.vy = Math.abs(this.vy); }
+                if (this.y > maxY) { this.y = maxY; this.vy = -Math.abs(this.vy); }
+                if (this.x < 20) { this.x = 20; this.vx = Math.abs(this.vx); }
+                if (this.x > this.canvasW - 20) { this.x = this.canvasW - 20; this.vx = -Math.abs(this.vx); }
+
+                // Timeout — leave after max hunt time
+                if (this.huntTimer > this.maxHuntTime) {
+                    this.phase = 'fleeing';
+                }
+                break;
+
+            case 'fleeing':
+                this.vy += 0.05; // Sink away
+                this.vx *= 0.98;
+                this.x += this.vx;
+                this.y += this.vy;
+                if (this.y > this.waterEndY + 100) {
+                    this.alive = false;
+                }
+                break;
+
+            case 'dying':
+                this.vy += 0.03;
+                this.x += this.vx * 0.5;
+                this.y += this.vy;
+                this.wobble = Math.sin(this.swimPhase * 3) * 5;
+                if (this.y > this.waterEndY + 100) {
+                    this.alive = false;
+                }
+                break;
+        }
+    }
+
+    draw(ctx) {
+        if (!this.alive) return;
+        ctx.save();
+        ctx.translate(this.x + Math.sin(this.wobble) * this.wobble, this.y);
+        if (!this.facingRight) ctx.scale(-1, 1);
+
+        const bodyWobble = Math.sin(this.swimPhase) * 2;
+
+        // Shadow / menace aura
+        if (this.phase === 'hunting') {
+            ctx.beginPath();
+            ctx.arc(0, bodyWobble, this.width * 0.8, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(200, 0, 0, ${0.06 + Math.sin(this.swimPhase) * 0.03})`;
+            ctx.fill();
+        }
+
+        // Tail
+        const tailWag = Math.sin(this.swimPhase * 1.5) * 12;
+        ctx.beginPath();
+        ctx.moveTo(-this.width / 2, bodyWobble);
+        ctx.lineTo(-this.width / 2 - 25, bodyWobble - 22 + tailWag);
+        ctx.lineTo(-this.width / 2 - 8, bodyWobble + tailWag * 0.3);
+        ctx.lineTo(-this.width / 2 - 25, bodyWobble + 22 + tailWag);
+        ctx.closePath();
+        ctx.fillStyle = '#455a64';
+        ctx.fill();
+
+        // Body — sleek and menacing
+        ctx.beginPath();
+        ctx.ellipse(0, bodyWobble, this.width / 2, this.height / 2, 0, 0, Math.PI * 2);
+        const bodyGrad = ctx.createLinearGradient(0, bodyWobble - this.height / 2, 0, bodyWobble + this.height / 2);
+        bodyGrad.addColorStop(0, '#546e7a');
+        bodyGrad.addColorStop(0.4, '#37474f');
+        bodyGrad.addColorStop(0.6, '#455a64');
+        bodyGrad.addColorStop(1, '#78909c');
+        ctx.fillStyle = bodyGrad;
+        ctx.fill();
+
+        // Belly (lighter)
+        ctx.beginPath();
+        ctx.ellipse(0, bodyWobble + this.height * 0.15, this.width * 0.4, this.height * 0.2, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(176, 190, 197, 0.6)';
+        ctx.fill();
+
+        // Dorsal fin — tall and menacing
+        ctx.beginPath();
+        ctx.moveTo(-8, bodyWobble - this.height / 2);
+        ctx.lineTo(0, bodyWobble - this.height / 2 - 18);
+        ctx.lineTo(12, bodyWobble - this.height / 2);
+        ctx.closePath();
+        ctx.fillStyle = '#37474f';
+        ctx.fill();
+
+        // Pectoral fins
+        ctx.beginPath();
+        ctx.moveTo(5, bodyWobble + this.height * 0.2);
+        ctx.lineTo(18, bodyWobble + this.height * 0.5 + 8);
+        ctx.lineTo(-5, bodyWobble + this.height * 0.3);
+        ctx.closePath();
+        ctx.fillStyle = '#455a64';
+        ctx.fill();
+
+        // Scars
+        for (const scar of this.scars) {
+            ctx.save();
+            ctx.translate(scar.x, bodyWobble + scar.y);
+            ctx.rotate(scar.angle);
+            ctx.beginPath();
+            ctx.moveTo(-scar.len / 2, 0);
+            ctx.lineTo(scar.len / 2, 0);
+            ctx.strokeStyle = 'rgba(200, 200, 200, 0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Head / snout
+        ctx.beginPath();
+        ctx.ellipse(this.width * 0.35, bodyWobble, this.width * 0.2, this.height * 0.35, 0, 0, Math.PI * 2);
+        ctx.fillStyle = '#455a64';
+        ctx.fill();
+
+        // JAW — opens and closes menacingly
+        const jawAngle = this.jawOpen * 0.4;
+        // Upper jaw
+        ctx.beginPath();
+        ctx.moveTo(this.width * 0.3, bodyWobble - 3);
+        ctx.lineTo(this.width * 0.55, bodyWobble - 5 - jawAngle * 8);
+        ctx.lineTo(this.width * 0.45, bodyWobble - 1);
+        ctx.closePath();
+        ctx.fillStyle = '#37474f';
+        ctx.fill();
+        // Lower jaw
+        ctx.beginPath();
+        ctx.moveTo(this.width * 0.3, bodyWobble + 3);
+        ctx.lineTo(this.width * 0.55, bodyWobble + 5 + jawAngle * 10);
+        ctx.lineTo(this.width * 0.45, bodyWobble + 1);
+        ctx.closePath();
+        ctx.fillStyle = '#37474f';
+        ctx.fill();
+
+        // TEETH — rows of sharp triangles
+        const teethCount = 7;
+        for (let i = 0; i < teethCount; i++) {
+            const t = i / teethCount;
+            const tx = this.width * 0.3 + t * this.width * 0.22;
+            const toothSize = 3 + (1 - t) * 3;
+            // Upper teeth
+            ctx.beginPath();
+            ctx.moveTo(tx - 1.5, bodyWobble - 2 - jawAngle * 4);
+            ctx.lineTo(tx, bodyWobble + toothSize - jawAngle * 2);
+            ctx.lineTo(tx + 1.5, bodyWobble - 2 - jawAngle * 4);
+            ctx.closePath();
+            ctx.fillStyle = '#eceff1';
+            ctx.fill();
+            // Lower teeth
+            ctx.beginPath();
+            ctx.moveTo(tx - 1.5, bodyWobble + 2 + jawAngle * 4);
+            ctx.lineTo(tx, bodyWobble - toothSize + jawAngle * 2);
+            ctx.lineTo(tx + 1.5, bodyWobble + 2 + jawAngle * 4);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // MOUTH interior (dark)
+        if (this.jawOpen > 0.15) {
+            ctx.beginPath();
+            ctx.ellipse(this.width * 0.42, bodyWobble, this.width * 0.08, this.jawOpen * 12, 0, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(30, 0, 0, 0.8)';
+            ctx.fill();
+        }
+
+        // Eye — glowing red
+        ctx.beginPath();
+        ctx.arc(this.width * 0.25, bodyWobble - 6, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        // Red iris
+        ctx.beginPath();
+        ctx.arc(this.width * 0.25 + 1.5, bodyWobble - 6, 3, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(244, 67, 54, ${0.7 + this.eyeGlow * 0.3})`;
+        ctx.fill();
+        // Slit pupil
+        ctx.beginPath();
+        ctx.moveTo(this.width * 0.25 + 1.5, bodyWobble - 9);
+        ctx.lineTo(this.width * 0.25 + 2, bodyWobble - 6);
+        ctx.lineTo(this.width * 0.25 + 1.5, bodyWobble - 3);
+        ctx.lineTo(this.width * 0.25 + 1, bodyWobble - 6);
+        ctx.closePath();
+        ctx.fillStyle = '#1a0000';
+        ctx.fill();
+
+        // Eye glow effect
+        ctx.beginPath();
+        ctx.arc(this.width * 0.25, bodyWobble - 6, 8, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(244, 67, 54, ${this.eyeGlow * 0.15})`;
+        ctx.fill();
+
+        // Dying effect — X eyes
+        if (this.phase === 'dying') {
+            ctx.strokeStyle = '#f44336';
+            ctx.lineWidth = 2;
+            const ex = this.width * 0.25;
+            const ey = bodyWobble - 6;
+            ctx.beginPath();
+            ctx.moveTo(ex - 4, ey - 4); ctx.lineTo(ex + 4, ey + 4);
+            ctx.moveTo(ex + 4, ey - 4); ctx.lineTo(ex - 4, ey + 4);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+
+        // HP bar when damaged
+        if (this.hp < this.maxHp && this.phase !== 'dying') {
+            const hpBarW = 50;
+            const hpBarH = 4;
+            const hpX = this.x - hpBarW / 2;
+            const hpY = this.y - this.height / 2 - 12;
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(hpX, hpY, hpBarW, hpBarH);
+            ctx.fillStyle = '#f44336';
+            ctx.fillRect(hpX, hpY, hpBarW * (this.hp / this.maxHp), hpBarH);
+        }
+
+        // Warning label
+        if (this.phase === 'hunting') {
+            ctx.save();
+            ctx.font = 'bold 10px Fredoka One, cursive';
+            ctx.fillStyle = `rgba(244, 67, 54, ${0.6 + Math.sin(Date.now() * 0.008) * 0.3})`;
+            ctx.textAlign = 'center';
+            ctx.fillText('\ud83e\udd88 SHARK!', this.x, this.y - this.height / 2 - 18);
+            ctx.restore();
+        }
+    }
+
+    // Check if near a fish (for auto-fight triggering)
+    isNearFish(fish) {
+        if (fish.flyFishMode) return false;
+        return Math.hypot(fish.x - this.x, fish.y - this.y) < 80;
     }
 }

@@ -1,7 +1,176 @@
 /* ============================================
    THE GREAT CRYSTAL FISH DEFENSE - GAME ENGINE
-   Main game loop, state management, and controls
+   Main game loop, state management, controls,
+   dynamic asset loading, shark system, and audio
    ============================================ */
+
+// ============================================
+// DYNAMIC ASSET LOADER
+// Assets are loaded by trying to fetch them — if the file exists, great!
+// If not, the game gracefully falls back to programmatic rendering.
+// This means designers can keep adding PNGs and audio and they'll
+// appear automatically on the next deploy/refresh.
+// ============================================
+const AssetLoader = {
+    images: {},
+    audio: {},
+    _loading: new Set(),
+
+    // Try to load an image. Returns the Image if loaded, null if not available.
+    loadImage(key, path) {
+        if (this.images[key] !== undefined) return; // Already attempted
+        this.images[key] = null; // Mark as attempted, null = not loaded
+        this._loading.add(key);
+        const img = new Image();
+        img.onload = () => {
+            this.images[key] = img;
+            this._loading.delete(key);
+            console.log(`✅ Asset loaded: ${path}`);
+        };
+        img.onerror = () => {
+            this.images[key] = null;
+            this._loading.delete(key);
+            // Silent fail — asset not provided yet, use programmatic fallback
+        };
+        img.src = path;
+    },
+
+    // Try to load audio. Returns HTMLAudioElement or null.
+    loadAudio(key, path, loop = false, volume = 0.5) {
+        if (this.audio[key] !== undefined) return;
+        this.audio[key] = null;
+        const audio = new Audio();
+        audio.oncanplaythrough = () => {
+            audio.loop = loop;
+            audio.volume = volume;
+            this.audio[key] = audio;
+            console.log(`🎵 Audio loaded: ${path}`);
+        };
+        audio.onerror = () => {
+            this.audio[key] = null;
+        };
+        audio.src = path;
+    },
+
+    // Get loaded image or null
+    getImage(key) {
+        return this.images[key] || null;
+    },
+
+    // Get loaded audio or null
+    getAudio(key) {
+        return this.audio[key] || null;
+    },
+
+    // Play audio if loaded and sound is on
+    playAudio(key, soundOn) {
+        if (!soundOn) return;
+        const a = this.audio[key];
+        if (a) {
+            // Clone for overlapping sounds
+            if (a.loop) {
+                if (a.paused) a.play().catch(() => { });
+            } else {
+                const clone = a.cloneNode();
+                clone.volume = a.volume;
+                clone.play().catch(() => { });
+            }
+        }
+    },
+
+    stopAudio(key) {
+        const a = this.audio[key];
+        if (a) {
+            a.pause();
+            a.currentTime = 0;
+        }
+    }
+};
+
+// ---- Load all known assets (they'll silently fail if not present) ----
+function loadAllAssets() {
+    // Fish sprites
+    const fishTypes = ['spike', 'glimmer', 'zoom'];
+    const fishStates = ['fw', 'bw', 'idle', 'eat', 'fly', 'baby'];
+    for (const type of fishTypes) {
+        for (const state of fishStates) {
+            AssetLoader.loadImage(`${type}_${state}`, `assets/fish/${type}_${state}.png`);
+        }
+        AssetLoader.loadImage(`${type}_sheet`, `assets/fish/${type}_sheet.png`);
+    }
+    AssetLoader.loadImage('zoom_dash', 'assets/fish/zoom_dash.png');
+
+    // Items
+    AssetLoader.loadImage('food_pellet', 'assets/items/food_pellet.png');
+    AssetLoader.loadImage('food_pellet_wet', 'assets/items/food_pellet_wet.png');
+    AssetLoader.loadImage('sparkle_pearl', 'assets/items/sparkle_pearl.png');
+    AssetLoader.loadImage('ice_crystal', 'assets/items/ice_crystal.png');
+    AssetLoader.loadImage('water_drop', 'assets/items/water_drop.png');
+
+    // Dragon
+    AssetLoader.loadImage('dragon_body', 'assets/dragon/dragon_body.png');
+    AssetLoader.loadImage('dragon_attack', 'assets/dragon/dragon_attack.png');
+    AssetLoader.loadImage('dragon_hit', 'assets/dragon/dragon_hit.png');
+    AssetLoader.loadImage('dragon_frozen', 'assets/dragon/dragon_frozen.png');
+    AssetLoader.loadImage('dragon_fall', 'assets/dragon/dragon_fall.png');
+    AssetLoader.loadImage('dragon_fire', 'assets/dragon/dragon_fire.png');
+    AssetLoader.loadImage('dragon_steam', 'assets/dragon/dragon_steam.png');
+    AssetLoader.loadImage('ice_overlay', 'assets/dragon/ice_overlay.png');
+
+    // Shark
+    AssetLoader.loadImage('shark_body', 'assets/shark/shark_body.png');
+    AssetLoader.loadImage('shark_attack', 'assets/shark/shark_attack.png');
+    AssetLoader.loadImage('shark_flee', 'assets/shark/shark_flee.png');
+    AssetLoader.loadImage('shark_dead', 'assets/shark/shark_dead.png');
+
+    // Submarine
+    AssetLoader.loadImage('submarine', 'assets/submarine/submarine.png');
+    AssetLoader.loadImage('crystal_projectile', 'assets/submarine/crystal_projectile.png');
+
+    // Bugs
+    AssetLoader.loadImage('bug_dragonfly', 'assets/bugs/bug_dragonfly.png');
+    AssetLoader.loadImage('bug_firefly', 'assets/bugs/bug_firefly.png');
+
+    // Backgrounds
+    AssetLoader.loadImage('bg_sky_normal', 'assets/backgrounds/normal/bg_sky_normal.png');
+    AssetLoader.loadImage('bg_sky_dragon', 'assets/backgrounds/dragon/bg_sky_dragon.png');
+    AssetLoader.loadImage('bg_moon', 'assets/backgrounds/normal/bg_moon.png');
+    AssetLoader.loadImage('bg_cloud_1', 'assets/backgrounds/normal/bg_cloud_1.png');
+    AssetLoader.loadImage('bg_cloud_2', 'assets/backgrounds/normal/bg_cloud_2.png');
+    AssetLoader.loadImage('bg_cloud_3', 'assets/backgrounds/normal/bg_cloud_3.png');
+    AssetLoader.loadImage('bg_landscape', 'assets/backgrounds/normal/bg_landscape.png');
+    AssetLoader.loadImage('bg_rocks', 'assets/backgrounds/normal/bg_rocks.png');
+    AssetLoader.loadImage('bg_towers', 'assets/backgrounds/dragon/bg_towers.png');
+
+    // UI
+    AssetLoader.loadImage('ui_pearl', 'assets/ui/ui_pearl.png');
+    AssetLoader.loadImage('ui_food', 'assets/ui/ui_food.png');
+    AssetLoader.loadImage('ui_crosshair', 'assets/ui/ui_crosshair.png');
+
+    // Banners
+    AssetLoader.loadImage('logo_main', 'assets/banners/logo_main.png');
+    AssetLoader.loadImage('banner_dragon', 'assets/banners/banner_dragon.png');
+    AssetLoader.loadImage('banner_victory', 'assets/banners/banner_victory.png');
+
+    // Audio
+    AssetLoader.loadAudio('music_normal', 'assets/audio/music_normal.mp3', true, 0.3);
+    AssetLoader.loadAudio('music_dragon', 'assets/audio/music_dragon.mp3', true, 0.4);
+    AssetLoader.loadAudio('sfx_splash_sm', 'assets/audio/sfx_splash_sm.mp3', false, 0.5);
+    AssetLoader.loadAudio('sfx_splash_lg', 'assets/audio/sfx_splash_lg.mp3', false, 0.6);
+    AssetLoader.loadAudio('sfx_munch', 'assets/audio/sfx_munch.mp3', false, 0.5);
+    AssetLoader.loadAudio('sfx_crystal', 'assets/audio/sfx_crystal.mp3', false, 0.5);
+    AssetLoader.loadAudio('sfx_shoot', 'assets/audio/sfx_shoot.mp3', false, 0.5);
+    AssetLoader.loadAudio('sfx_roar', 'assets/audio/sfx_roar.mp3', false, 0.6);
+    AssetLoader.loadAudio('sfx_dragon_hit', 'assets/audio/sfx_dragon_hit.mp3', false, 0.5);
+    AssetLoader.loadAudio('sfx_flyfish', 'assets/audio/sfx_flyfish.mp3', false, 0.5);
+    AssetLoader.loadAudio('sfx_bug', 'assets/audio/sfx_bug.mp3', false, 0.4);
+    AssetLoader.loadAudio('sfx_pearl', 'assets/audio/sfx_pearl.mp3', false, 0.3);
+    AssetLoader.loadAudio('sfx_fire', 'assets/audio/sfx_fire.mp3', false, 0.4);
+    AssetLoader.loadAudio('sfx_victory', 'assets/audio/sfx_victory.mp3', false, 0.6);
+}
+
+// Start loading immediately
+loadAllAssets();
 
 // ---- CANVAS SETUP ----
 const canvas = document.getElementById('gameCanvas');
@@ -15,7 +184,6 @@ resizeCanvas();
 window.addEventListener('resize', () => {
     resizeCanvas();
     water.resize();
-    // Update fish bounds
     for (const fish of fishes) {
         fish.canvasW = canvas.width;
         fish.canvasH = canvas.height;
@@ -42,7 +210,7 @@ const state = {
     level: 1,
     score: 0,
     feedCount: 0,
-    feedGoal: 10, // feeds to trigger dragon event
+    feedGoal: 10,
     dragonDefeated: 0,
     soundOn: true
 };
@@ -51,6 +219,7 @@ const state = {
 let fishes = [];
 let foodPellets = [];
 let bugs = [];
+let sharks = [];
 let iceCrystals = [];
 let crystalProjectiles = [];
 let sparklePearls = [];
@@ -92,6 +261,8 @@ let dragonIntroTimer = 0;
 let victoryTimer = 0;
 let bugSpawnTimer = 0;
 let crystalSpawnTimer = 0;
+let sharkSpawnTimer = 0;
+let currentMusic = null;
 
 // ============================================
 // EVENT LISTENERS
@@ -141,6 +312,24 @@ document.addEventListener('keyup', (e) => {
 });
 
 // ============================================
+// MUSIC MANAGEMENT
+// ============================================
+function switchMusic(trackKey) {
+    if (currentMusic === trackKey) return;
+    // Stop current music
+    if (currentMusic) AssetLoader.stopAudio(currentMusic);
+    currentMusic = trackKey;
+    AssetLoader.playAudio(trackKey, state.soundOn);
+}
+
+function stopAllMusic() {
+    if (currentMusic) {
+        AssetLoader.stopAudio(currentMusic);
+        currentMusic = null;
+    }
+}
+
+// ============================================
 // GAME INIT
 // ============================================
 function startGame() {
@@ -154,23 +343,23 @@ function startGame() {
     fishes = [];
     foodPellets = [];
     bugs = [];
+    sharks = [];
     iceCrystals = [];
     crystalProjectiles = [];
     sparklePearls = [];
     dragon = null;
     submarine = null;
 
-    // Spawn initial fish
     spawnFish('spike');
     spawnFish('glimmer');
     spawnFish('zoom');
 
-    // Spawn some bugs
     for (let i = 0; i < 6; i++) {
         bugs.push(new FlyingBug(canvas.width, water.START_Y));
     }
 
     water.setDragonMode(false);
+    switchMusic('music_normal');
     updateHUD();
 }
 
@@ -183,6 +372,11 @@ function spawnFish(type) {
 function toggleSound() {
     state.soundOn = !state.soundOn;
     document.getElementById('btn-sound').textContent = state.soundOn ? '🔊' : '🔇';
+    if (!state.soundOn) {
+        stopAllMusic();
+    } else if (currentMusic) {
+        AssetLoader.playAudio(currentMusic, true);
+    }
 }
 
 // ============================================
@@ -194,6 +388,7 @@ function handleClick(mx, my) {
         for (const fish of fishes) {
             if (fish.joy >= 100 && fish.isClickedInWater(mx, my)) {
                 if (fish.activateFlyFish(water)) {
+                    AssetLoader.playAudio('sfx_flyfish', state.soundOn);
                     return;
                 }
             }
@@ -204,18 +399,18 @@ function handleClick(mx, my) {
             launcherActive = true;
             launcherStart = { x: mx, y: my };
         } else if (state.food > 0) {
-            // Direct drop food into water
             const pellet = new FoodPellet(mx, my, 0, 1);
             foodPellets.push(pellet);
             state.food--;
+            AssetLoader.playAudio('sfx_splash_sm', state.soundOn);
             updateHUD();
         }
     } else if (state.phase === GamePhase.DRAGON_FIGHT) {
-        // Shoot crystal
         if (submarine) {
             const proj = submarine.shootCrystal();
             if (proj) {
                 crystalProjectiles.push(new CrystalProjectile(proj.x, proj.y, proj.vx, proj.vy));
+                AssetLoader.playAudio('sfx_shoot', state.soundOn);
             }
         }
     }
@@ -236,6 +431,7 @@ function launchFood(endX, endY) {
     );
     foodPellets.push(pellet);
     state.food--;
+    AssetLoader.playAudio('sfx_splash_sm', state.soundOn);
     updateHUD();
 }
 
@@ -244,6 +440,7 @@ function handleSpacebar() {
         const proj = submarine.shootCrystal();
         if (proj) {
             crystalProjectiles.push(new CrystalProjectile(proj.x, proj.y, proj.vx, proj.vy));
+            AssetLoader.playAudio('sfx_shoot', state.soundOn);
         }
     }
 }
@@ -292,9 +489,9 @@ function updateNormal() {
     // Fish
     for (const fish of fishes) {
         fish.update(water, foodPellets, bugs);
-        // Check if fish ate — reward pearls
         if (fish.hunger > 99 && Math.random() < 0.01) {
             state.pearls += 1;
+            AssetLoader.playAudio('sfx_pearl', state.soundOn);
             for (let i = 0; i < 3; i++) {
                 sparklePearls.push(new SparklePearl(fish.x, fish.y));
             }
@@ -314,6 +511,7 @@ function updateNormal() {
         bugs[i].update();
         if (!bugs[i].alive) {
             state.pearls += 5;
+            AssetLoader.playAudio('sfx_bug', state.soundOn);
             for (let k = 0; k < 5; k++) {
                 sparklePearls.push(new SparklePearl(bugs[i].x, bugs[i].y));
             }
@@ -335,6 +533,43 @@ function updateNormal() {
         updateHUD();
     }
 
+    // ---- SHARK SYSTEM ----
+    sharkSpawnTimer++;
+    // Sharks spawn more frequently at higher levels
+    const sharkInterval = Math.max(400, 900 - state.level * 80);
+    if (sharkSpawnTimer > sharkInterval && sharks.length < 2 + Math.floor(state.level / 2)) {
+        sharks.push(new Shark(canvas.width, water.START_Y, water.END_Y));
+        sharkSpawnTimer = 0;
+    }
+
+    // Update sharks
+    for (let i = sharks.length - 1; i >= 0; i--) {
+        const shark = sharks[i];
+        shark.update(fishes, water);
+
+        // Auto-fight: Fish near a shark will fight if fed enough
+        if (shark.phase === 'hunting') {
+            for (const fish of fishes) {
+                if (shark.isNearFish(fish) && fish.canFight()) {
+                    fish.fightShark(shark, water);
+                    AssetLoader.playAudio('sfx_splash_lg', state.soundOn);
+                }
+            }
+        }
+
+        // Reward for defeating sharks
+        if (!shark.alive) {
+            if (shark.hp <= 0) {
+                state.pearls += 15;
+                for (let k = 0; k < 10; k++) {
+                    sparklePearls.push(new SparklePearl(shark.x, shark.y));
+                }
+                updateHUD();
+            }
+            sharks.splice(i, 1);
+        }
+    }
+
     // Dragon event trigger
     const totalJoy = fishes.reduce((sum, f) => sum + f.joy, 0);
     if (totalJoy >= state.feedGoal * 20 && state.dragonDefeated < state.level) {
@@ -344,9 +579,16 @@ function updateNormal() {
 
 function startDragonEvent() {
     state.phase = GamePhase.DRAGON_INTRO;
-    dragonIntroTimer = 180; // 3 seconds
+    dragonIntroTimer = 180;
     water.setDragonMode(true);
+    switchMusic('music_dragon');
+    AssetLoader.playAudio('sfx_roar', state.soundOn);
     document.getElementById('dragon-banner').classList.remove('hidden');
+
+    // Sharks flee when dragon arrives
+    for (const shark of sharks) {
+        shark.phase = 'fleeing';
+    }
 }
 
 function updateDragonIntro() {
@@ -357,7 +599,6 @@ function updateDragonIntro() {
         dragon = new Dragon(canvas.width, canvas.height);
         submarine = new Submarine(canvas.width / 2, water.START_Y + 60);
 
-        // Spawn ice crystals in water
         for (let i = 0; i < 5; i++) {
             const cx = 80 + Math.random() * (canvas.width - 160);
             const cy = water.START_Y + 40 + Math.random() * (water.END_Y - water.START_Y - 80);
@@ -367,32 +608,28 @@ function updateDragonIntro() {
 }
 
 function updateDragonFight() {
-    // Submarine
     if (submarine) {
         submarine.update(keys, water);
     }
 
-    // Dragon
     if (dragon) {
         dragon.update(water);
 
-        // Check fire zone vs submarine
         const fireZone = dragon.getFireZone();
         if (fireZone && submarine) {
             if (submarine.x > fireZone.x && submarine.x < fireZone.x + fireZone.width &&
                 submarine.y > fireZone.y && submarine.y < fireZone.y + fireZone.height) {
-                // Push submarine away
                 submarine.y += 5;
             }
         }
 
         if (!dragon.alive) {
-            // Dragon defeated!
             state.dragonDefeated++;
             state.phase = GamePhase.VICTORY;
             victoryTimer = 300;
             const bonus = 50 + state.level * 20;
             state.pearls += bonus;
+            AssetLoader.playAudio('sfx_victory', state.soundOn);
             document.getElementById('victory-banner').classList.remove('hidden');
             document.getElementById('victory-pearls').textContent = `+${bonus} Sparkle Pearls!`;
 
@@ -409,26 +646,21 @@ function updateDragonFight() {
         }
     }
 
-    // Ice crystals
     for (let i = iceCrystals.length - 1; i >= 0; i--) {
         iceCrystals[i].update();
-
-        // Collect with submarine
         if (submarine) {
             const dist = Math.hypot(iceCrystals[i].x - submarine.x, iceCrystals[i].y - submarine.y);
             if (dist < 30) {
                 submarine.collectCrystal();
+                AssetLoader.playAudio('sfx_crystal', state.soundOn);
                 iceCrystals.splice(i, 1);
                 continue;
             }
         }
     }
 
-    // Crystal projectiles
     for (let i = crystalProjectiles.length - 1; i >= 0; i--) {
         crystalProjectiles[i].update();
-
-        // Hit dragon
         if (dragon && crystalProjectiles[i].alive) {
             const dist = Math.hypot(
                 crystalProjectiles[i].x - dragon.x,
@@ -437,7 +669,7 @@ function updateDragonFight() {
             if (dist < 60) {
                 dragon.hit(15);
                 crystalProjectiles[i].alive = false;
-                // Steam particles
+                AssetLoader.playAudio('sfx_dragon_hit', state.soundOn);
                 for (let k = 0; k < 8; k++) {
                     sparklePearls.push(new SparklePearl(
                         crystalProjectiles[i].x + (Math.random() - 0.5) * 20,
@@ -446,13 +678,11 @@ function updateDragonFight() {
                 }
             }
         }
-
         if (!crystalProjectiles[i].alive) {
             crystalProjectiles.splice(i, 1);
         }
     }
 
-    // Respawn crystals
     crystalSpawnTimer++;
     if (crystalSpawnTimer > 240 && iceCrystals.length < 4) {
         const cx = 80 + Math.random() * (canvas.width - 160);
@@ -473,8 +703,8 @@ function updateVictory() {
         water.setDragonMode(false);
         iceCrystals = [];
         crystalProjectiles = [];
+        switchMusic('music_normal');
 
-        // Spawn more bugs
         for (let i = 0; i < 4; i++) {
             bugs.push(new FlyingBug(canvas.width, water.START_Y));
         }
@@ -511,6 +741,9 @@ function draw() {
     water.draw();
 
     // Underwater entities
+    // Sharks (drawn behind fish)
+    for (const shark of sharks) shark.draw(ctx);
+
     for (const fish of fishes) {
         if (!fish.flyFishMode) fish.draw(ctx);
     }
@@ -535,28 +768,38 @@ function draw() {
     if (state.phase === GamePhase.DRAGON_FIGHT) {
         drawDragonFightHUD();
     }
+
+    // Shark warning indicator
+    if (sharks.length > 0 && state.phase === GamePhase.NORMAL) {
+        drawSharkWarning();
+    }
 }
 
 function drawBackground() {
     const isDragon = state.phase === GamePhase.DRAGON_INTRO ||
         state.phase === GamePhase.DRAGON_FIGHT;
 
-    // Sky gradient
-    let skyGrad;
-    if (isDragon) {
-        skyGrad = ctx.createLinearGradient(0, 0, 0, water.START_Y);
-        skyGrad.addColorStop(0, '#1a0a2e');
-        skyGrad.addColorStop(0.5, '#2d1b4e');
-        skyGrad.addColorStop(1, '#3e1f5c');
+    // Sky gradient (or asset if loaded)
+    const skyImg = AssetLoader.getImage(isDragon ? 'bg_sky_dragon' : 'bg_sky_normal');
+    if (skyImg) {
+        ctx.drawImage(skyImg, 0, 0, canvas.width, water.START_Y);
     } else {
-        skyGrad = ctx.createLinearGradient(0, 0, 0, water.START_Y);
-        skyGrad.addColorStop(0, '#0a1628');
-        skyGrad.addColorStop(0.4, '#0d2137');
-        skyGrad.addColorStop(0.7, '#1a3a5c');
-        skyGrad.addColorStop(1, '#2d5a7b');
+        let skyGrad;
+        if (isDragon) {
+            skyGrad = ctx.createLinearGradient(0, 0, 0, water.START_Y);
+            skyGrad.addColorStop(0, '#1a0a2e');
+            skyGrad.addColorStop(0.5, '#2d1b4e');
+            skyGrad.addColorStop(1, '#3e1f5c');
+        } else {
+            skyGrad = ctx.createLinearGradient(0, 0, 0, water.START_Y);
+            skyGrad.addColorStop(0, '#0a1628');
+            skyGrad.addColorStop(0.4, '#0d2137');
+            skyGrad.addColorStop(0.7, '#1a3a5c');
+            skyGrad.addColorStop(1, '#2d5a7b');
+        }
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, canvas.width, water.START_Y);
     }
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, 0, canvas.width, water.START_Y);
 
     // Stars
     for (const star of bgStars) {
@@ -572,33 +815,43 @@ function drawBackground() {
 
     // Moon
     if (!isDragon) {
+        const moonImg = AssetLoader.getImage('bg_moon');
         const moonX = canvas.width * 0.8;
         const moonY = 80;
-        ctx.beginPath();
-        ctx.arc(moonX, moonY, 30, 0, Math.PI * 2);
-        const moonGrad = ctx.createRadialGradient(moonX - 5, moonY - 5, 5, moonX, moonY, 30);
-        moonGrad.addColorStop(0, 'rgba(255, 255, 230, 0.9)');
-        moonGrad.addColorStop(1, 'rgba(200, 200, 180, 0.1)');
-        ctx.fillStyle = moonGrad;
-        ctx.fill();
+        if (moonImg) {
+            ctx.drawImage(moonImg, moonX - 40, moonY - 40, 80, 80);
+        } else {
+            ctx.beginPath();
+            ctx.arc(moonX, moonY, 30, 0, Math.PI * 2);
+            const moonGrad = ctx.createRadialGradient(moonX - 5, moonY - 5, 5, moonX, moonY, 30);
+            moonGrad.addColorStop(0, 'rgba(255, 255, 230, 0.9)');
+            moonGrad.addColorStop(1, 'rgba(200, 200, 180, 0.1)');
+            ctx.fillStyle = moonGrad;
+            ctx.fill();
 
-        // Moon glow
-        ctx.beginPath();
-        ctx.arc(moonX, moonY, 60, 0, Math.PI * 2);
-        const moonGlow = ctx.createRadialGradient(moonX, moonY, 30, moonX, moonY, 60);
-        moonGlow.addColorStop(0, 'rgba(255, 255, 200, 0.1)');
-        moonGlow.addColorStop(1, 'rgba(255, 255, 200, 0)');
-        ctx.fillStyle = moonGlow;
-        ctx.fill();
+            ctx.beginPath();
+            ctx.arc(moonX, moonY, 60, 0, Math.PI * 2);
+            const moonGlow = ctx.createRadialGradient(moonX, moonY, 30, moonX, moonY, 60);
+            moonGlow.addColorStop(0, 'rgba(255, 255, 200, 0.1)');
+            moonGlow.addColorStop(1, 'rgba(255, 255, 200, 0)');
+            ctx.fillStyle = moonGlow;
+            ctx.fill();
+        }
     }
 
     // Clouds
     ctx.save();
-    for (const cloud of bgClouds) {
-        ctx.beginPath();
-        ctx.ellipse(cloud.x, cloud.y, cloud.w / 2, cloud.h / 2, 0, 0, Math.PI * 2);
-        ctx.fillStyle = isDragon ? 'rgba(80, 30, 100, 0.3)' : 'rgba(100, 140, 180, 0.15)';
-        ctx.fill();
+    for (let ci = 0; ci < bgClouds.length; ci++) {
+        const cloud = bgClouds[ci];
+        const cloudImg = AssetLoader.getImage(`bg_cloud_${(ci % 3) + 1}`);
+        if (cloudImg) {
+            ctx.drawImage(cloudImg, cloud.x - cloud.w / 2, cloud.y - cloud.h / 2, cloud.w, cloud.h);
+        } else {
+            ctx.beginPath();
+            ctx.ellipse(cloud.x, cloud.y, cloud.w / 2, cloud.h / 2, 0, 0, Math.PI * 2);
+            ctx.fillStyle = isDragon ? 'rgba(80, 30, 100, 0.3)' : 'rgba(100, 140, 180, 0.15)';
+            ctx.fill();
+        }
     }
     ctx.restore();
 
@@ -608,10 +861,17 @@ function drawBackground() {
 
 function drawSilhouette(isDragon) {
     const baseY = water.START_Y;
+
+    // Try asset
+    const landscapeImg = AssetLoader.getImage(isDragon ? 'bg_towers' : 'bg_landscape');
+    if (landscapeImg) {
+        const lh = 120;
+        ctx.drawImage(landscapeImg, 0, baseY - lh, canvas.width, lh);
+        return;
+    }
+
     ctx.beginPath();
     ctx.moveTo(0, baseY);
-
-    // Jagged landscape
     const segments = 20;
     const segW = canvas.width / segments;
     for (let i = 0; i <= segments; i++) {
@@ -624,7 +884,6 @@ function drawSilhouette(isDragon) {
     ctx.fillStyle = isDragon ? 'rgba(30, 10, 40, 0.6)' : 'rgba(10, 25, 50, 0.5)';
     ctx.fill();
 
-    // Gothic towers during dragon phase
     if (isDragon) {
         const towers = [0.15, 0.35, 0.55, 0.75, 0.9];
         for (const frac of towers) {
@@ -635,7 +894,6 @@ function drawSilhouette(isDragon) {
             ctx.fillStyle = 'rgba(20, 5, 30, 0.7)';
             ctx.fillRect(tx - tw / 2, baseY - th, tw, th);
 
-            // Pointed top
             ctx.beginPath();
             ctx.moveTo(tx - tw / 2 - 3, baseY - th);
             ctx.lineTo(tx, baseY - th - 15 - Math.random() * 5);
@@ -643,7 +901,6 @@ function drawSilhouette(isDragon) {
             ctx.closePath();
             ctx.fill();
 
-            // Tiny window
             ctx.beginPath();
             ctx.arc(tx, baseY - th + 10, 2, 0, Math.PI * 2);
             ctx.fillStyle = 'rgba(255, 200, 100, 0.4)';
@@ -657,7 +914,6 @@ function drawLauncherPreview() {
     const dy = launcherStart.y - mouse.y;
     const power = Math.min(Math.hypot(dx, dy) * 0.08, 12);
 
-    // Draw line
     ctx.setLineDash([5, 5]);
     ctx.beginPath();
     ctx.moveTo(launcherStart.x, launcherStart.y);
@@ -667,14 +923,12 @@ function drawLauncherPreview() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Power indicator
     ctx.beginPath();
     ctx.arc(launcherStart.x, launcherStart.y, 8 + power, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255, 152, 0, 0.5)';
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Trajectory preview
     const angle = Math.atan2(dy, dx);
     const vx = Math.cos(angle) * power;
     const vy = Math.sin(angle) * power;
@@ -710,6 +964,20 @@ function drawDragonFightHUD() {
     ctx.restore();
 }
 
+function drawSharkWarning() {
+    const huntingSharks = sharks.filter(s => s.phase === 'hunting');
+    if (huntingSharks.length === 0) return;
+
+    ctx.save();
+    ctx.font = 'bold 14px Fredoka One, cursive';
+    ctx.textAlign = 'center';
+    const alpha = 0.5 + Math.sin(Date.now() * 0.006) * 0.3;
+    ctx.fillStyle = `rgba(244, 67, 54, ${alpha})`;
+    ctx.fillText(`⚠️ ${huntingSharks.length} SHARK${huntingSharks.length > 1 ? 'S' : ''} ATTACKING! Feed your fish so they can fight!`,
+        canvas.width / 2, water.START_Y - 10);
+    ctx.restore();
+}
+
 // ============================================
 // HUD UPDATE
 // ============================================
@@ -719,7 +987,6 @@ function updateHUD() {
     document.getElementById('level-text').textContent = `Level ${state.level}`;
 }
 
-// Update fish panel on hover (simplified — shows first fish near mouse)
 function updateFishPanel() {
     const panel = document.getElementById('fish-panel');
     let found = false;
@@ -732,9 +999,11 @@ function updateFishPanel() {
                 document.getElementById('fish-hunger-bar').style.width = `${fish.hunger}%`;
                 document.getElementById('fish-joy-bar').style.width = `${fish.joy}%`;
                 let statusText = '';
-                if (fish.joy >= 100) statusText = '🚀 Ready for Fly Fish Mode!';
+                if (fish.fighting) statusText = '⚔️ Fighting a shark!';
+                else if (fish.joy >= 100) statusText = '🚀 Ready for Fly Fish Mode!';
                 else if (fish.hunger < 20) statusText = '😢 Very hungry!';
-                else if (fish.hunger > 80) statusText = '😊 Well fed!';
+                else if (fish.hunger < 25) statusText = '⚠️ Too hungry to fight!';
+                else if (fish.hunger > 80) statusText = '😊 Well fed & battle ready!';
                 else statusText = '🐟 Swimming around...';
                 document.getElementById('fish-panel-status').textContent = statusText;
                 found = true;

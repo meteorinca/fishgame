@@ -1,6 +1,7 @@
 /* ============================================
    WATER PHYSICS ENGINE (Gloop System)
    Based on the 2D-Water-Javascript-Demo spring model
+   Enhanced with ambient turbulence, swell, and rolling waves
    ============================================ */
 
 class WaterSystem {
@@ -10,11 +11,11 @@ class WaterSystem {
 
         // Spring physics parameters
         this.WAVE_FREQ = 5;
-        this.WAV_PASS = 8; // Increased for more fluid spread
+        this.WAV_PASS = 8;
         this.K = 0.05;
-        this.SPREAD = 0.25; // Increased to spread turbulence
-        this.DAMP = 0.003; // Decreased dampening so waves last longer
-        this.TENSION = 0.015; // Increased tension for snappier waves
+        this.SPREAD = 0.28;
+        this.DAMP = 0.0025;
+        this.TENSION = 0.018;
         this.SPEED = 0;
 
         // Water surface position (fraction of canvas height)
@@ -25,6 +26,21 @@ class WaterSystem {
 
         this.springs = [];
         this.particles = []; // Splash droplets
+
+        // Ambient wave system — layered sine waves for constant choppiness
+        this.time = 0;
+        this.ambientWaves = [
+            { amplitude: 3.0, frequency: 0.008, speed: 0.04, phase: 0 },
+            { amplitude: 1.8, frequency: 0.015, speed: 0.06, phase: 1.2 },
+            { amplitude: 1.0, frequency: 0.035, speed: 0.09, phase: 2.5 },
+            { amplitude: 0.6, frequency: 0.06, speed: 0.12, phase: 0.7 },
+        ];
+
+        // Rolling swell — big slow waves that travel across the screen
+        this.swells = [
+            { amplitude: 5, wavelength: 400, speed: 1.2, offset: 0 },
+            { amplitude: 3, wavelength: 250, speed: -0.8, offset: 100 },
+        ];
 
         // Color palette
         this.normalColors = {
@@ -64,6 +80,16 @@ class WaterSystem {
 
     setDragonMode(on) {
         this.colors = on ? this.dragonColors : this.normalColors;
+        // Dragon mode = stormier water
+        if (on) {
+            this.ambientWaves[0].amplitude = 5.0;
+            this.ambientWaves[1].amplitude = 3.5;
+            this.swells[0].amplitude = 8;
+        } else {
+            this.ambientWaves[0].amplitude = 3.0;
+            this.ambientWaves[1].amplitude = 1.8;
+            this.swells[0].amplitude = 5;
+        }
     }
 
     getSurfaceY(worldX) {
@@ -77,6 +103,19 @@ class WaterSystem {
     splash(index, speed) {
         if (index >= 0 && index < this.springs.length) {
             this.springs[index].speed = speed;
+
+            // Also disturb neighboring springs for a wider splash
+            const radius = Math.min(Math.floor(Math.abs(speed) / 10), 20);
+            for (let i = 1; i <= radius; i++) {
+                const falloff = 1 - (i / radius);
+                if (index - i >= 0) {
+                    this.springs[index - i].speed += speed * falloff * 0.5;
+                }
+                if (index + i < this.springs.length) {
+                    this.springs[index + i].speed += speed * falloff * 0.5;
+                }
+            }
+
             this._createSplashParticles(index, speed);
         }
     }
@@ -95,13 +134,13 @@ class WaterSystem {
     _createSplashParticles(springIdx, speed) {
         const y = this.START_Y + (this.springs[springIdx].height - this.HEIGHT);
         const x = springIdx * this.WAVE_FREQ;
-        const count = Math.min(Math.floor(Math.abs(speed) / 3), 40); // Generate way more particles faster
+        const count = Math.min(Math.floor(Math.abs(speed) / 3), 40);
         for (let i = 0; i < count; i++) {
-            const vx = (Math.random() - 0.5) * 8;
-            const vy = -Math.random() * Math.sqrt(Math.abs(speed)) * 2.5;
+            const vx = (Math.random() - 0.5) * 10;
+            const vy = -Math.random() * Math.sqrt(Math.abs(speed)) * 3;
             const r = 2 + Math.random() * 6;
             this.particles.push({
-                x: x + (Math.random() - 0.5) * 20,
+                x: x + (Math.random() - 0.5) * 30,
                 y: y,
                 vx: vx,
                 vy: vy,
@@ -113,10 +152,31 @@ class WaterSystem {
     }
 
     update() {
-        // Add random ambient choppiness occasionally
-        if (Math.random() < 0.08) {
+        this.time++;
+
+        // ---- Ambient choppiness: random pokes ----
+        if (Math.random() < 0.12) {
             const randomIdx = Math.floor(Math.random() * this.springs.length);
-            this.springs[randomIdx].speed += (Math.random() - 0.5) * 15;
+            this.springs[randomIdx].speed += (Math.random() - 0.5) * 18;
+        }
+
+        // ---- Ambient sine waves: continuous undulation ----
+        for (const wave of this.ambientWaves) {
+            wave.phase += wave.speed;
+            for (let i = 0; i < this.springs.length; i++) {
+                const force = Math.sin(i * wave.frequency + wave.phase) * wave.amplitude * 0.02;
+                this.springs[i].speed += force;
+            }
+        }
+
+        // ---- Rolling swells: big slow traveling waves ----
+        for (const swell of this.swells) {
+            swell.offset += swell.speed;
+            for (let i = 0; i < this.springs.length; i++) {
+                const worldX = i * this.WAVE_FREQ;
+                const force = Math.sin((worldX + swell.offset) / swell.wavelength * Math.PI * 2) * swell.amplitude * 0.008;
+                this.springs[i].speed += force;
+            }
         }
 
         // Update springs
@@ -187,7 +247,7 @@ class WaterSystem {
             ctx.fill();
         }
 
-        // Draw surface highlight
+        // Draw surface highlights — double line for foam effect
         ctx.beginPath();
         ctx.moveTo(0, this.START_Y);
         for (let i = 0; i < this.springs.length; i++) {
@@ -195,8 +255,20 @@ class WaterSystem {
             const h = this.START_Y + (s.height - this.HEIGHT);
             ctx.lineTo(s.x, h);
         }
-        ctx.strokeStyle = 'rgba(140, 220, 255, 0.35)';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(180, 235, 255, 0.45)';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        // Second thinner highlight line
+        ctx.beginPath();
+        ctx.moveTo(0, this.START_Y);
+        for (let i = 0; i < this.springs.length; i++) {
+            const s = this.springs[i];
+            const h = this.START_Y + (s.height - this.HEIGHT) - 1;
+            ctx.lineTo(s.x, h);
+        }
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 1;
         ctx.stroke();
 
         // Draw splash particles
