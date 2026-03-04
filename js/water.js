@@ -10,11 +10,11 @@ class WaterSystem {
 
         // Spring physics parameters
         this.WAVE_FREQ = 5;
-        this.WAV_PASS = 6;
+        this.WAV_PASS = 8; // Increased for more fluid spread
         this.K = 0.05;
-        this.SPREAD = 0.2;
-        this.DAMP = 0.005;
-        this.TENSION = 0.01;
+        this.SPREAD = 0.25; // Increased to spread turbulence
+        this.DAMP = 0.003; // Decreased dampening so waves last longer
+        this.TENSION = 0.015; // Increased tension for snappier waves
         this.SPEED = 0;
 
         // Water surface position (fraction of canvas height)
@@ -95,7 +95,7 @@ class WaterSystem {
     _createSplashParticles(springIdx, speed) {
         const y = this.START_Y + (this.springs[springIdx].height - this.HEIGHT);
         const x = springIdx * this.WAVE_FREQ;
-        const count = Math.min(Math.floor(Math.abs(speed) / 8), 15);
+        const count = Math.min(Math.floor(Math.abs(speed) / 3), 40); // Generate way more particles faster
         for (let i = 0; i < count; i++) {
             const vx = (Math.random() - 0.5) * 8;
             const vy = -Math.random() * Math.sqrt(Math.abs(speed)) * 2.5;
@@ -113,6 +113,12 @@ class WaterSystem {
     }
 
     update() {
+        // Add random ambient choppiness occasionally
+        if (Math.random() < 0.08) {
+            const randomIdx = Math.floor(Math.random() * this.springs.length);
+            this.springs[randomIdx].speed += (Math.random() - 0.5) * 15;
+        }
+
         // Update springs
         for (let i = 0; i < this.springs.length; i++) {
             const s = this.springs[i];
