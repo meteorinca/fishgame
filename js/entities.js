@@ -217,6 +217,12 @@ class Fish {
         this.targetY = null;
         this.idleTimer = 0;
 
+        // Turning animation (shows front-view PNG)
+        this.turning = false;
+        this.turnTimer = 0;
+        this.turnDuration = 15; // frames to show front view during direction change
+        this.prevFacingRight = this.facingRight;
+
         // Fighting state
         this.fighting = false;
         this.fightTarget = null;
@@ -381,6 +387,15 @@ class Fish {
         this.x += this.vx;
         this.y += this.vy;
 
+        // Detect turning (direction change)
+        if (this.facingRight !== this.prevFacingRight) {
+            this.turning = true;
+            this.turnTimer = this.turnDuration;
+        }
+        this.prevFacingRight = this.facingRight;
+        if (this.turnTimer > 0) { this.turnTimer--; }
+        else { this.turning = false; }
+
         // Keep in water
         if (this.y < waterMinY) { this.y = waterMinY; this.vy = Math.abs(this.vy) * 0.5; }
         if (this.y > waterMaxY) { this.y = waterMaxY; this.vy = -Math.abs(this.vy) * 0.5; }
@@ -456,6 +471,36 @@ class Fish {
 
         ctx.save();
         ctx.translate(this.x, this.y);
+
+        // Try PNG sprite rendering
+        const spriteKey = this.turning ? `${this.type}_front` : `${this.type}_fw`;
+        const sprite = typeof AssetLoader !== 'undefined' ? AssetLoader.getImage(spriteKey) : null;
+        if (sprite) {
+            // Scale PNG to fish entity size, keeping aspect ratio
+            const aspect = sprite.naturalWidth / sprite.naturalHeight;
+            const drawH = this.height * 2.2;
+            const drawW = drawH * aspect;
+            if (!this.turning && !this.facingRight) ctx.scale(-1, 1);
+            // Gentle bob
+            const bob = Math.sin(this.swimPhase) * 2;
+            // Slight tilt based on vy
+            const tilt = this.turning ? 0 : Math.atan2(this.vy, Math.abs(this.vx) + 1) * 0.3;
+            ctx.rotate(tilt);
+            ctx.drawImage(sprite, -drawW / 2, -drawH / 2 + bob, drawW, drawH);
+            // Ready glow when joy is full
+            if (this.joy >= 100) {
+                ctx.beginPath();
+                ctx.arc(0, bob, drawW * 0.45, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 215, 0, ${0.12 + Math.sin(this.glowPhase) * 0.08})`;
+                ctx.fill();
+            }
+            ctx.restore();
+            this._drawMeters(ctx);
+            this._drawAbilityFx(ctx);
+            return;
+        }
+
+        // Fallback: programmatic rendering
         if (!this.facingRight) ctx.scale(-1, 1);
 
         const bodyWobble = Math.sin(this.swimPhase) * 2;
@@ -549,7 +594,12 @@ class Fish {
 
         ctx.restore();
 
-        // Draw ability effects
+        // Draw ability effects + meters
+        this._drawAbilityFx(ctx);
+        this._drawMeters(ctx);
+    }
+
+    _drawAbilityFx(ctx) {
         for (const fx of this.abilityFx) {
             ctx.save();
             ctx.globalAlpha = fx.alpha;
@@ -559,7 +609,6 @@ class Fish {
                 ctx.strokeStyle = '#81c784';
                 ctx.lineWidth = 3;
                 ctx.stroke();
-                // Inner ring
                 ctx.beginPath();
                 ctx.arc(fx.x, fx.y, fx.radius * 0.6, 0, Math.PI * 2);
                 ctx.strokeStyle = 'rgba(129, 199, 132, 0.5)';
@@ -588,9 +637,6 @@ class Fish {
             }
             ctx.restore();
         }
-
-        // Draw meters above fish
-        this._drawMeters(ctx);
     }
 
     _drawFlyFish(ctx) {

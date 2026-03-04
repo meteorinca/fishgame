@@ -33,7 +33,7 @@ const AssetLoader = {
 
 function loadAllAssets() {
     ['spike', 'glimmer', 'zoom'].forEach(t => {
-        ['fw', 'bw', 'idle', 'eat', 'fly', 'baby'].forEach(s => AssetLoader.loadImage(`${t}_${s}`, `assets/fish/${t}_${s}.png`));
+        ['fw', 'bw', 'idle', 'eat', 'fly', 'baby', 'front'].forEach(s => AssetLoader.loadImage(`${t}_${s}`, `assets/fish/${t}_${s}.png`));
     });
     ['food_pellet', 'sparkle_pearl', 'ice_crystal', 'water_drop'].forEach(k => AssetLoader.loadImage(k, `assets/items/${k}.png`));
     ['shark_body', 'shark_attack', 'shark_flee', 'shark_dead'].forEach(k => AssetLoader.loadImage(k, `assets/shark/${k}.png`));
